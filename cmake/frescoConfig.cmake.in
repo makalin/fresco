@@ -1,0 +1,15 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Find dependencies
+find_dependency(Threads REQUIRED)
+
+# Include the targets file
+include("${CMAKE_CURRENT_LIST_DIR}/frescoTargets.cmake")
+
+# Set variables for backward compatibility
+set(FRESCO_LIBRARIES fresco::fresco)
+set(FRESCO_INCLUDE_DIRS "@PACKAGE_INCLUDE_DIRS@")
+
+check_required_components(fresco)

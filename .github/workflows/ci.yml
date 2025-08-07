@@ -1,0 +1,221 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+        build-type: [Release, Debug]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake pkg-config
+        sudo apt-get install -y libgtest-dev libgmock-dev
+        sudo apt-get install -y python3 python3-pip python3-dev
+        sudo apt-get install -y nodejs npm
+    
+    - name: Set compiler
+      run: |
+        if [ "${{ matrix.compiler }}" = "gcc" ]; then
+          echo "CC=gcc" >> $GITHUB_ENV
+          echo "CXX=g++" >> $GITHUB_ENV
+        else
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "CXX=clang++" >> $GITHUB_ENV
+        fi
+    
+    - name: Configure CMake
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+                 -DBUILD_TESTS=ON \
+                 -DBUILD_BENCHMARKS=ON \
+                 -DBUILD_TOOLS=ON
+    
+    - name: Build
+      run: |
+        cd build
+        make -j$(nproc)
+    
+    - name: Test
+      run: |
+        cd build
+        make test
+    
+    - name: Install Python dependencies
+      run: |
+        pip3 install -r requirements.txt
+    
+    - name: Build Python package
+      run: |
+        cd bindings/python
+        python3 setup.py build
+    
+    - name: Install Node.js dependencies
+      run: |
+        npm install
+    
+    - name: Build Node.js package
+      run: |
+        npm run build
+    
+    - name: Run Node.js tests
+      run: |
+        npm test
+
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        build-type: [Release, Debug]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install dependencies
+      run: |
+        brew install cmake pkg-config
+        brew install googletest
+        brew install python@3.9
+        brew install node
+    
+    - name: Configure CMake
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+                 -DBUILD_TESTS=ON \
+                 -DBUILD_BENCHMARKS=ON \
+                 -DBUILD_TOOLS=ON
+    
+    - name: Build
+      run: |
+        cd build
+        make -j$(sysctl -n hw.ncpu)
+    
+    - name: Test
+      run: |
+        cd build
+        make test
+    
+    - name: Install Python dependencies
+      run: |
+        pip3 install -r requirements.txt
+    
+    - name: Build Python package
+      run: |
+        cd bindings/python
+        python3 setup.py build
+
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        build-type: [Release, Debug]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install dependencies
+      uses: lukka/run-vcpkg@v9
+    
+    - name: Configure CMake
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+                 -DBUILD_TESTS=ON \
+                 -DBUILD_BENCHMARKS=ON \
+                 -DBUILD_TOOLS=ON \
+                 -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+    
+    - name: Build
+      run: |
+        cd build
+        cmake --build . --config ${{ matrix.build-type }} --parallel
+    
+    - name: Test
+      run: |
+        cd build
+        ctest -C ${{ matrix.build-type }}
+
+  code-quality:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-format
+        pip3 install black flake8 mypy
+    
+    - name: Check code formatting
+      run: |
+        # Check C++ formatting
+        find src -name "*.cpp" -o -name "*.h" | xargs clang-format --dry-run --Werror
+        find include -name "*.h" | xargs clang-format --dry-run --Werror
+        find tools -name "*.cpp" | xargs clang-format --dry-run --Werror
+        find tests -name "*.cpp" | xargs clang-format --dry-run --Werror
+        
+        # Check Python formatting
+        black --check bindings/python/
+        
+        # Check Python linting
+        flake8 bindings/python/
+        mypy bindings/python/
+
+  security:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Run security scan
+      uses: github/codeql-action/init@v2
+      with:
+        languages: cpp, python
+    
+    - name: Build for security analysis
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        make -j$(nproc)
+    
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v2
+
+  documentation:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install dependencies
+      run: |
+        pip3 install sphinx sphinx-rtd-theme myst-parser
+    
+    - name: Build documentation
+      run: |
+        cd docs
+        make html
+    
+    - name: Upload documentation
+      uses: actions/upload-artifact@v3
+      with:
+        name: documentation
+        path: docs/_build/html/
